@@ -1,0 +1,62 @@
+/* MathChallenge - elegante sobre fondo oscuro */
+.math-challenge {
+  background: rgba(255, 255, 255, 0.15); /* translúcido sobre azul */
+  border-radius: 15px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.3);
+  max-width: 100%;
+  width: 320px;
+  padding: 25px;
+  margin: 0 auto;
+  text-align: center;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.math-challenge:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+/* Título principal resaltando */
+.math-challenge h3 {
+  font-size: 1.7rem;
+  font-weight: 800;
+  color: #00b45a; /* color verde agua brillante */
+  text-shadow: 1px 1px 5px rgba(0,0,0,0.6); /* sombra para resaltar sobre azul */
+  margin-bottom: 15px;
+}
+
+.challenge-text {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 15px;
+}
+
+.feedback {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #00ffcc;
+  margin-top: 8px;
+}
+
+/* Input centrado */
+.math-challenge input {
+  background: rgba(255, 255, 255, 0.25);
+  border: none;
+  color: #ffffff;
+  font-weight: bold;
+  text-align: center;
+}
+
+.math-challenge input::placeholder {
+  color: #ffffffaa;
+}
+
+/* Ajustes responsive */
+@media (max-width: 992px) {
+  .math-challenge {
+    width: 80%;
+    margin: 15px auto;
+  }
+}

@@ -1,0 +1,48 @@
+/* Fondo animado premium */
+.bg-gradient-animation {
+  background: linear-gradient(270deg, #0f172a, #1a2442, #3a4a6d, #0f172a);
+  background-size: 800% 800%;
+  animation: gradientMove 20s ease infinite;
+}
+
+@keyframes gradientMove {
+  0% { background-position: 0% 50%; }
+  25% { background-position: 50% 50%; }
+  50% { background-position: 100% 50%; }
+  75% { background-position: 50% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Máximo ancho para login */
+.max-w-login {
+  max-width: 450px;
+}
+
+/* Lista elegante sin checks */
+.elegant-list li {
+  margin-bottom: 0.5rem;
+}
+
+/* MathChallenge */
+.math-challenge {
+  background: rgba(255,255,255,0.1);
+  border-radius: 15px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  max-width: 350px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.challenge-text {
+  font-size: 1.5rem;
+  font-weight: bold;
+}
+
+.feedback {
+  font-weight: bold;
+  font-size: 1rem;
+  text-align: center;
+  margin-top: 0.5rem;
+}
