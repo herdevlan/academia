@@ -1,15 +1,28 @@
+//Backend/src/controllers/authController.js
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { User, LogAction } = require('../../models');
 const mfaService = require('../services/mfaService');
 
+// 🔹 Validación de contraseña
+const validatePassword = (password) => {
+  const minLength = 8;
+  const complexity = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/;
+  if (!password || password.length < minLength)
+    return "La contraseña debe tener al menos 8 caracteres";
+  if (!complexity.test(password))
+    return "Debe incluir mayúsculas, minúsculas, números y caracteres especiales";
+  return null;
+};
+
 const SALT_ROUNDS = parseInt(process.env.BCRYPT_SALT_ROUNDS || '10');
+const LOGIN_ATTEMPTS_LIMIT = 3;
+const LOGIN_BLOCK_TIME = 0.25 * 60 * 1000; // 15 minutos
 
 function signToken(user) {
-  return jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '8h' });
+  return jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '5m' });
 }
 
-// TEMP token for MFA step: short expiry
 function signTempToken(userId) {
   return jwt.sign({ id: userId, temp: true }, process.env.JWT_SECRET, { expiresIn: '5m' });
 }
@@ -19,31 +32,31 @@ module.exports = {
     try {
       const { name, email, emailConfirm, password, passwordConfirm, role } = req.body;
 
-      if (!email || !emailConfirm || email !== emailConfirm) {
+      if (!email || !emailConfirm || email !== emailConfirm)
         return res.status(400).json({ message: 'Emails no coinciden' });
-      }
-      if (!password || !passwordConfirm || password !== passwordConfirm) {
-        return res.status(400).json({ message: 'Contraseñas no coinciden' });
-      }
 
-      // Validaciones adicionales (longitud)
-      if (password.length < 6) return res.status(400).json({ message: 'Contraseña muy corta' });
+      if (!password || !passwordConfirm || password !== passwordConfirm)
+        return res.status(400).json({ message: 'Contraseñas no coinciden' });
+
+      const passwordError = validatePassword(password);
+      if (passwordError) return res.status(400).json({ message: passwordError });
 
       const existing = await User.findOne({ where: { email } });
       if (existing) return res.status(409).json({ message: 'Email ya registrado' });
 
-      const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
-
-      const user = await User.create({ name, email, password_hash, role: role || 'estudiante' });
-
+      // 🔹 Usar setter virtual 'password'
+      const user = await User.create({ name, email, password, role: role || 'estudiante' });
       await LogAction.create({ user_id: user.id, action: 'register', meta: { ip: req.ip } });
 
       const token = signToken(user);
-
-      return res.status(201).json({ message: 'Usuario creado', token });
+      return res.status(201).json({
+        message: 'Usuario creado',
+        token,
+        user: { id: user.id, name: user.name, email: user.email, role: user.role }
+      });
     } catch (err) {
-      console.error(err);
-      return res.status(500).json({ message: 'Error servidor', error: err.message });
+      console.error('Error creando usuario:', err);
+      return res.status(500).json({ message: 'Error creando/actualizando usuario', error: err.message });
     }
   },
 
@@ -53,22 +66,41 @@ module.exports = {
       const user = await User.findOne({ where: { email } });
       if (!user) return res.status(401).json({ message: 'Credenciales inválidas' });
 
-      const match = await bcrypt.compare(password, user.password_hash);
-      //if (!match) return res.status(401).json({ message: 'Credenciales inválidas' });
-      if (!user.checkPassword(password)) return res.status(401).json({ message: 'Credenciales inválidas' });
+      if (user.block_until && new Date() < new Date(user.block_until)) {
+        const diff = Math.ceil((new Date(user.block_until) - new Date()) / 1000);
+        return res.status(403).json({ message: 'Usuario bloqueado temporalmente', blockedSeconds: diff });
+      }
 
+      if (!user.checkPassword(password)) {
+        user.failed_attempts = (user.failed_attempts || 0) + 1;
+        let attemptsLeft = LOGIN_ATTEMPTS_LIMIT - user.failed_attempts;
 
-      // registrar intento
+        if (user.failed_attempts >= LOGIN_ATTEMPTS_LIMIT) {
+          user.block_until = new Date(Date.now() + LOGIN_BLOCK_TIME);
+          user.failed_attempts = 0;
+          attemptsLeft = 0;
+        }
+
+        await user.save();
+        return res.status(401).json({ message: 'Credenciales inválidas', attemptsLeft });
+      }
+
+      user.failed_attempts = 0;
+      user.block_until = null;
+      await user.save();
+
       await LogAction.create({ user_id: user.id, action: 'login', meta: { ip: req.ip } });
 
+      const userData = { id: user.id, name: user.name, email: user.email, role: user.role };
+
       if (user.mfa_enabled) {
-        // generar tempToken
         const tempToken = signTempToken(user.id);
-        return res.json({ mfaRequired: true, tempToken });
+        return res.json({ mfaRequired: true, tempToken, user: userData });
       }
 
       const token = signToken(user);
-      return res.json({ token });
+      return res.json({ token, user: userData });
+
     } catch (err) {
       console.error(err);
       return res.status(500).json({ message: 'Error servidor' });
@@ -77,29 +109,27 @@ module.exports = {
 
   async me(req, res) {
     try {
-      const user = await User.findByPk(req.user.id, { attributes: ['id','name','email','role','mfa_enabled'] });
-      return res.json({ user });
+      const user = await User.findByPk(req.user.id, {
+        attributes: ['id', 'name', 'email', 'role', 'mfa_enabled']
+      });
+      if (!user) return res.status(404).json({ message: 'Usuario no encontrado' });
+      return res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role, mfa_enabled: user.mfa_enabled } });
     } catch (err) {
+      console.error(err);
       return res.status(500).json({ message: 'Error servidor' });
     }
   },
 
-  // 🔒 Generar secret y QR para usuario (protegido)
+  // MFA
   async mfaSetup(req, res) {
     try {
       const user = await User.findByPk(req.user.id);
       if (!user) return res.status(404).json({ message: 'Usuario no encontrado' });
-
       const secret = mfaService.generateSecret();
       const encrypted = mfaService.encryptSecret(secret);
-
-      // almacenar temporalmente en DB (no activado aún)
       user.mfa_secret = encrypted;
       await user.save();
-
-      // generar QR data URL (opcional)
       const dataUrl = await mfaService.generateQRCodeDataURL(user.email, secret);
-
       return res.json({ message: 'Secreto generado', qr: dataUrl });
     } catch (err) {
       console.error(err);
@@ -107,21 +137,16 @@ module.exports = {
     }
   },
 
-  // 🔒 Verificar token TOTP. Si la petición viene con tempToken (login MFA flow) devuelve JWT final
   async mfaVerify(req, res) {
     try {
       const { code } = req.body;
       const authHeader = req.headers.authorization || '';
-      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : (req.body.tempToken || null);
-
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : req.body.tempToken || null;
       if (!token) return res.status(401).json({ message: 'Token temporal requerido' });
 
       let payload;
-      try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-      } catch (err) {
-        return res.status(401).json({ message: 'Token inválido o expirado' });
-      }
+      try { payload = jwt.verify(token, process.env.JWT_SECRET); }
+      catch { return res.status(401).json({ message: 'Token inválido o expirado' }); }
 
       const user = await User.findByPk(payload.id);
       if (!user || !user.mfa_secret) return res.status(400).json({ message: 'MFA no configurado' });
@@ -129,13 +154,11 @@ module.exports = {
       const valid = mfaService.verifyToken(user.mfa_secret, code);
       if (!valid) return res.status(401).json({ message: 'Código inválido' });
 
-      // Si el token era un tempToken (payload.temp), se trata de completar login
       if (payload.temp) {
         const finalToken = signToken(user);
-        return res.json({ token: finalToken });
+        return res.json({ token: finalToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
       }
 
-      // Si no era temp token, entonces se usa para activar MFA: habilitar
       user.mfa_enabled = true;
       await user.save();
       return res.json({ message: 'MFA activado' });
@@ -145,5 +168,3 @@ module.exports = {
     }
   }
 };
-
-
